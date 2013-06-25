@@ -109,7 +109,8 @@ Discourse.Markdown = {
 
     // Extract quotes so their contents are not passed through markdown.
     converter.hooks.chain("preConversion", function(text) {
-      var extracted = Discourse.BBCode.extractQuotes(text);
+      var formated = Discourse.BBCode.format(text, opts);
+      var extracted = Discourse.BBCode.extractQuotes(formated);
       quoteTemplate = extracted.template;
       return extracted.text;
     });
@@ -122,7 +123,8 @@ Discourse.Markdown = {
     });
 
     // newline prediction in trivial cases
-    if (!Discourse.SiteSettings.traditional_markdown_linebreaks) {
+    var linebreaks = opts.traditional_markdown_linebreaks || Discourse.SiteSettings.traditional_markdown_linebreaks;
+    if (!linebreaks) {
       converter.hooks.chain("preConversion", function(text) {
         return text.replace(/(^[\w<][^\n]*\n+)/gim, function(t) {
           if (t.match(/\n{2}/gim)) return t;
@@ -183,7 +185,7 @@ Discourse.Markdown = {
         text = quoteTemplate(text);
       }
 
-      return Discourse.BBCode.format(text, opts);
+      return text;
     });
 
     if (opts.sanitize) {

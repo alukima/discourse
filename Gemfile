@@ -30,6 +30,8 @@ gem 'fog', require: false
 gem 'has_ip_address'
 gem 'hiredis'
 
+gem 'email_reply_parser'
+
 # note: for image_optim to correctly work you need
 # sudo apt-get install -y advancecomp gifsicle jpegoptim libjpeg-progs optipng pngcrush
 gem 'image_optim'
@@ -96,15 +98,12 @@ group :test do
 end
 
 group :test, :development do
-  gem 'jshint_on_rails'
   gem 'listen', require: false
-  gem 'guard-jshint-on-rails', require: false
   gem 'certified', require: false
   gem 'fabrication', require: false
-  gem 'guard-jasmine', require: false
+  gem 'qunit-rails'
   gem 'guard-rspec', require: false
   gem 'guard-spork', require: false
-  gem 'jasminerice'
   gem 'mocha', require: false
   gem 'rb-fsevent', require: RUBY_PLATFORM =~ /darwin/i ? 'rb-fsevent' : false
   gem 'rb-inotify', '~> 0.9', require: RUBY_PLATFORM =~ /linux/i ? 'rb-inotify' : false

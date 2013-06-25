@@ -29,6 +29,7 @@ class SiteSetting < ActiveRecord::Base
   client_setting(:polling_interval, 3000)
   client_setting(:anon_polling_interval, 30000)
   client_setting(:min_post_length, Rails.env.test? ? 5 : 20)
+  client_setting(:min_private_message_post_length, Rails.env.test? ? 5 : 10)
   client_setting(:max_post_length, 16000)
   client_setting(:min_topic_title_length, 15)
   client_setting(:max_topic_title_length, 255)
@@ -36,7 +37,7 @@ class SiteSetting < ActiveRecord::Base
   client_setting(:allow_uncategorized_topics, true)
   client_setting(:min_search_term_length, 3)
   client_setting(:flush_timings_secs, 5)
-  client_setting(:supress_reply_directly_below, true)
+  client_setting(:suppress_reply_directly_below, true)
   client_setting(:email_domains_blacklist, 'mailinator.com')
   client_setting(:email_domains_whitelist)
   client_setting(:version_checks, true)
@@ -70,6 +71,7 @@ class SiteSetting < ActiveRecord::Base
   setting(:queue_jobs, !Rails.env.test?)
   setting(:crawl_images, !Rails.env.test?)
   setting(:max_image_width, 690)
+  setting(:create_thumbnails, false)
   client_setting(:category_featured_topics, 6)
   setting(:topics_per_page, 30)
   setting(:posts_per_page, 20)
@@ -77,7 +79,6 @@ class SiteSetting < ActiveRecord::Base
   setting(:active_user_rate_limit_secs, 60)
   setting(:previous_visit_timeout_hours, 1)
   client_setting(:favicon_url, '/assets/default-favicon.ico')
-  client_setting(:dynamic_favicon, false)
   setting(:apple_touch_icon_url, '/assets/default-apple-touch-icon.png')
 
   setting(:ninja_edit_window, 5.minutes.to_i)
@@ -161,7 +162,7 @@ class SiteSetting < ActiveRecord::Base
 
   setting(:enforce_global_nicknames, true)
   setting(:discourse_org_access_key, '')
-  
+
   setting(:enable_s3_uploads, false)
   setting(:s3_access_key_id, '')
   setting(:s3_secret_access_key, '')
@@ -179,13 +180,23 @@ class SiteSetting < ActiveRecord::Base
   setting(:basic_requires_read_posts, 50)
   setting(:basic_requires_time_spent_mins, 15)
 
-  setting(:regular_requires_topics_entered, 3)
+  setting(:regular_requires_topics_entered, 20)
   setting(:regular_requires_read_posts, 100)
   setting(:regular_requires_time_spent_mins, 60)
   setting(:regular_requires_days_visited, 15)
   setting(:regular_requires_likes_received, 1)
   setting(:regular_requires_likes_given, 1)
   setting(:regular_requires_topic_reply_count, 3)
+
+  # Reply by Email Settings
+  setting(:reply_by_email_enabled, false)
+  setting(:reply_by_email_address, '')
+
+  setting(:pop3s_polling_enabled, false)
+  setting(:pop3s_polling_host, '')
+  setting(:pop3s_polling_port, 995)
+  setting(:pop3s_polling_username, '')
+  setting(:pop3s_polling_password, '')
 
   # Entropy checks
   setting(:title_min_entropy, 10)
@@ -211,6 +222,8 @@ class SiteSetting < ActiveRecord::Base
   client_setting(:topic_views_heat_medium, 2000)
   client_setting(:topic_views_heat_high,   5000)
 
+  setting(:minimum_topics_similar, 50)
+
   def self.generate_api_key!
     self.api_key = SecureRandom.hex(32)
   end
@@ -234,6 +247,10 @@ class SiteSetting < ActiveRecord::Base
 
   def self.post_length
     min_post_length..max_post_length
+  end
+
+  def self.private_message_post_length
+    min_private_message_post_length..max_post_length
   end
 
   def self.homepage

@@ -135,7 +135,7 @@ Discourse.TopicController = Discourse.ObjectController.extend(Discourse.Selected
 
   jumpBottom: function() {
     if (this.get('bestOf')) {
-      Discourse.TopicView.scrollTo(this.get('id'), this.get('posts').last().get('post_number'));
+      Discourse.TopicView.scrollTo(this.get('id'), _.last(this.get('posts')).get('post_number'));
     } else {
       Discourse.URL.routeTo(this.get('lastPostUrl'));
     }
@@ -429,6 +429,10 @@ Discourse.TopicController = Discourse.ObjectController.extend(Discourse.Selected
     if (onPostRendered) {
       onPostRendered(post);
     }
+  },
+
+  removeAllowedUser: function(username) {
+    this.get('model').removeAllowedUser(username);
   }
 });
 

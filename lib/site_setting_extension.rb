@@ -1,6 +1,17 @@
 require_dependency 'enum'
+require_dependency 'site_settings/db_provider'
 
 module SiteSettingExtension
+
+  # part 1 of refactor, centralizing the dependency here
+  def provider=(val)
+    @provider = val
+    refresh!
+  end
+
+  def provider
+    @provider ||= SiteSettings::DbProvider.new(SiteSetting)
+  end
 
   def types
     @types ||= Enum.new(:string, :time, :fixnum, :float, :bool, :null, :enum)
@@ -12,7 +23,7 @@ module SiteSettingExtension
 
   def current
     @@containers ||= {}
-    @@containers[RailsMultisite::ConnectionManagement.current_db] ||= {}
+    @@containers[provider.current_site] ||= {}
   end
 
   def defaults
@@ -27,7 +38,10 @@ module SiteSettingExtension
     mutex.synchronize do
       self.defaults[name] = default
       current_value = current.has_key?(name) ? current[name] : default
-      enums[name] = opts[:enum] if opts[:enum]
+      if opts[:enum]
+        enum = opts[:enum]
+        enums[name] = enum.is_a?(String) ? enum.constantize : enum
+      end
       setup_methods(name, current_value)
     end
   end
@@ -66,18 +80,12 @@ module SiteSettingExtension
        description: description(s),
        default: v,
        type: type.to_s,
-       value: value.to_s}.merge( type == :enum ? {valid_values: enum_class(s).all_values} : {})
+       value: value.to_s}.merge( type == :enum ? {valid_values: enum_class(s).values} : {})
     end
   end
 
   def description(setting)
     I18n.t("site_settings.#{setting}")
-  end
-
-  # table is not in the db yet, initial migration, etc
-  def table_exists?
-    @table_exists = ActiveRecord::Base.connection.table_exists? 'site_settings' if @table_exists == nil
-    @table_exists
   end
 
   def self.client_settings_cache_key
@@ -86,26 +94,16 @@ module SiteSettingExtension
 
   # refresh all the site settings
   def refresh!
-    return unless table_exists?
     mutex.synchronize do
       ensure_listen_for_changes
       old = current
-      changes = []
-      deletions = []
 
-      all_settings = SiteSetting.select([:name,:value,:data_type])
+      all_settings = provider.all
       new_hash =  Hash[*(all_settings.map{|s| [s.name.intern, convert(s.value,s.data_type)]}.to_a.flatten)]
 
       # add defaults
       new_hash = defaults.merge(new_hash)
-
-      new_hash.each do |name, value|
-        changes << [name,value] if !old.has_key?(name) || old[name] != value
-      end
-
-      old.each do |name,value|
-        deletions << [name,value] unless new_hash.has_key?(name)
-      end
+      changes,deletions = diff_hash(new_hash, old)
 
       if deletions.length > 0 || changes.length > 0
         @current = new_hash
@@ -121,23 +119,26 @@ module SiteSettingExtension
     end
   end
 
+
   def ensure_listen_for_changes
     unless @subscribed
-      pid = process_id
-      MessageBus.subscribe("/site_settings") do |msg|
-        message = msg.data
-        if message["process"] != pid
-          begin
-            @last_message_processed = msg.global_id
-            # picks a db
-            MessageBus.on_connect.call(msg.site_id)
-            SiteSetting.refresh!
-          ensure
-            MessageBus.on_disconnect.call(msg.site_id)
-          end
-        end
+      MessageBus.subscribe("/site_settings") do |message|
+        process_message(message)
       end
       @subscribed = true
+    end
+  end
+
+  def process_message(message)
+    data = message.data
+    if data["process"] != process_id
+      begin
+        @last_message_processed = message.global_id
+        MessageBus.on_connect.call(message.site_id)
+        refresh!
+      ensure
+        MessageBus.on_disconnect.call(message.site_id)
+      end
     end
   end
 
@@ -152,14 +153,11 @@ module SiteSettingExtension
   end
 
   def remove_override!(name)
-    return unless table_exists?
-    SiteSetting.where(name: name).destroy_all
+    provider.destroy(name)
+    current[name] = defaults[name]
   end
 
   def add_override!(name,val)
-    return unless table_exists?
-
-    setting = SiteSetting.where(name: name).first
     type = get_data_type(name, defaults[name])
 
     if type == types[:bool] && val != true && val != false
@@ -178,30 +176,37 @@ module SiteSettingExtension
       raise Discourse::InvalidParameters.new(:value) unless enum_class(name).valid_value?(val)
     end
 
-    if setting
-      setting.value = val
-      setting.data_type = type
-      setting.save
-    else
-      SiteSetting.create!(name: name, value: val, data_type: type)
-    end
-
+    provider.save(name, val, type)
     @last_message_sent = MessageBus.publish('/site_settings', {process: process_id})
   end
 
-
   protected
+
+  def diff_hash(new_hash, old)
+    changes = []
+    deletions = []
+
+    new_hash.each do |name, value|
+      changes << [name,value] if !old.has_key?(name) || old[name] != value
+    end
+
+    old.each do |name,value|
+      deletions << [name,value] unless new_hash.has_key?(name)
+    end
+
+    [changes,deletions]
+  end
 
   def get_data_type(name,val)
     return types[:null] if val.nil?
+    return types[:enum] if enums[name]
 
-    if enums[name]
-      types[:enum]
-    elsif String === val
+    case val
+    when String
       types[:string]
-    elsif Fixnum === val
+    when Fixnum
       types[:fixnum]
-    elsif TrueClass === val || FalseClass === val
+    when TrueClass, FalseClass
       types[:bool]
     else
       raise ArgumentError.new :val
@@ -215,7 +220,7 @@ module SiteSettingExtension
     when types[:string], types[:enum]
       value
     when types[:bool]
-      value == "t"
+      value == true || value == "t" || value == "true"
     when types[:null]
       nil
     end
@@ -225,16 +230,12 @@ module SiteSettingExtension
   def setup_methods(name, current_value)
 
     # trivial multi db support, we can optimize this later
-    db = RailsMultisite::ConnectionManagement.current_db
-
-    @@containers ||= {}
-    @@containers[db] ||= {}
-    @@containers[db][name] = current_value
+    current[name] = current_value
 
     setter = ("#{name}=").sub("?","")
 
     eval "define_singleton_method :#{name} do
-      c = @@containers[RailsMultisite::ConnectionManagement.current_db]
+      c = @@containers[provider.current_site]
       c = c[name] if c
       c
     end
@@ -255,7 +256,6 @@ module SiteSettingExtension
   end
 
   def enum_class(name)
-    enums[name] = enums[name].constantize unless enums[name].is_a?(Class)
     enums[name]
   end
 
